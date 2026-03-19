@@ -1,0 +1,20 @@
+alias: "Victron - Register devices"
+trigger:
+  - platform: homeassistant
+    event: start
+  - platform: time_pattern
+    hours: "/1"
+action:
+  - service: mqtt.publish
+    data:
+      topic: "venus-home/device/ha_bridge/Status"
+      retain: true
+      payload: >
+        {
+          "clientId": "ha_bridge",
+          "connected": 1,
+          "version": "HA-bridge v1.0",
+          "services": {
+            "ev1": "evcharger"
+          }
+        }

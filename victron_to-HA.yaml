@@ -1,10 +1,10 @@
 alias: Victron - Apply EV charger commands from Victron
 description: ""
 triggers:
-  - topic: venus-home/N/48e7da87b65f/evcharger/+/SetCurrent
+  - topic: venus-home/N/<deviceid>/evcharger/+/SetCurrent
     id: set_current
     trigger: mqtt
-  - topic: venus-home/N/48e7da87b65f/evcharger/+/StartStop
+  - topic: venus-home/N/<deviceid>/evcharger/+/StartStop
     id: start_stop
     trigger: mqtt
 conditions:

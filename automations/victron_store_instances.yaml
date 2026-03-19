@@ -1,0 +1,10 @@
+alias: "Victron - Store D-Bus instances"
+trigger:
+  - platform: mqtt
+    topic: "venus-home/device/ha_bridge/DBus"
+action:
+  - service: input_text.set_value
+    target:
+      entity_id: input_text.victron_instance_ev1
+    data:
+      value: "{{ trigger.payload_json.deviceInstance.ev1 }}"

@@ -1,0 +1,10 @@
+alias: "Victron - Store EV charger mode"
+trigger:
+  - platform: mqtt
+    topic: "venus-home/N/48e7da87b65f/evcharger/+/Mode"
+action:
+  - service: input_text.set_value
+    target:
+      entity_id: input_text.victron_ev_mode
+    data:
+      value: "{{ trigger.payload_json.value | int }}"

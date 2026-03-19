@@ -1,0 +1,12 @@
+alias: "Victron - Disconnect on shutdown"
+trigger:
+  - platform: homeassistant
+    event: shutdown
+action:
+  - service: mqtt.publish
+    data:
+      topic: "venus-home/device/ha_bridge/Status"
+      retain: true
+      payload: >
+        {"clientId":"ha_bridge","connected":0,
+         "version":"HA-bridge v1.0","services":{}}

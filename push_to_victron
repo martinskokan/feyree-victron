@@ -1,0 +1,146 @@
+alias: Victron - Push EV charger
+variables:
+  status_map:
+    idle: 0
+    standby: 0
+    connected: 1
+    charging: 2
+    charged: 3
+    waiting: 6
+    fault: 11
+  base: >-
+    venus-home/W/<deviceid>/evcharger/{{
+    states('input_text.victron_instance_ev1') }}
+triggers:
+  - trigger: state
+    entity_id:
+      - sensor.ev_charger_status
+      - sensor.ev_charger_power
+      - sensor.ev_charger_current
+      - sensor.ev_charger_current_b
+      - sensor.ev_charger_current_c
+      - sensor.ev_charger_voltage
+      - sensor.ev_charger_voltage_b
+      - sensor.ev_charger_voltage_c
+      - sensor.ev_charger_energy
+      - select.ev_charger_charging
+      - number.ev_charger_set_charge_current   # ← back in triggers, safe now
+conditions:
+  - condition: template
+    value_template: "{{ states('input_text.victron_instance_ev1') != '' }}"
+  - condition: template
+    value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
+actions:
+  # Status
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Status"
+      payload: >
+        {"value": {{ status_map.get(states('sensor.ev_charger_status'), 0) }}}
+
+  # StartStop
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/StartStop"
+      payload: >
+        {"value": {{ 1 if is_state('select.ev_charger_charging', 'On') else 0 }}}
+
+  # Total power (sensor reports kW → convert to W)
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/Power"
+      payload: >
+        {"value": {{ (states("sensor.ev_charger_power") | float(0) * 1000) | round(1) }}}
+
+  # L1
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L1/Power"
+      payload: >
+        {"value": {{ ((states("sensor.ev_charger_voltage") | float(0))
+                    * (states("sensor.ev_charger_current") | float(0))) | round(1) }}}
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L1/Voltage"
+      payload: '{"value": {{ states("sensor.ev_charger_voltage") | float(0) }}}'
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L1/Current"
+      payload: '{"value": {{ states("sensor.ev_charger_current") | float(0) }}}'
+
+  # L2
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L2/Power"
+      payload: >
+        {"value": {{ ((states("sensor.ev_charger_voltage_b") | float(0))
+                    * (states("sensor.ev_charger_current_b") | float(0))) | round(1) }}}
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L2/Voltage"
+      payload: '{"value": {{ states("sensor.ev_charger_voltage_b") | float(0) }}}'
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L2/Current"
+      payload: '{"value": {{ states("sensor.ev_charger_current_b") | float(0) }}}'
+
+  # L3
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L3/Power"
+      payload: >
+        {"value": {{ ((states("sensor.ev_charger_voltage_c") | float(0))
+                    * (states("sensor.ev_charger_current_c") | float(0))) | round(1) }}}
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L3/Voltage"
+      payload: '{"value": {{ states("sensor.ev_charger_voltage_c") | float(0) }}}'
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/L3/Current"
+      payload: '{"value": {{ states("sensor.ev_charger_current_c") | float(0) }}}'
+
+  # SetCurrent — NEW: updates Victron's stored setpoint so echoes match
+  # This is the key fix — without this Victron echoes the old setpoint forever
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/SetCurrent"
+      payload: '{"value": {{ states("number.ev_charger_set_charge_current") | float(0) | round(0) | int }}}'
+
+  # Current — actual delivered current (reported by charger, not setpoint)
+  # Using L1 as the reference phase for the EVCS /Current path
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Current"
+      payload: '{"value": {{ states("sensor.ev_charger_current") | float(0) }}}'
+
+  # Hardware maximum
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/MaxCurrent"
+      payload: '{"value": 16}'
+
+  # Total energy
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/Ac/Energy/Forward"
+      payload: '{"value": {{ states("sensor.ev_charger_energy") | float(0) }}}'
+
+  # Display name
+  - action: mqtt.publish
+    data:
+      topic: "{{ base }}/CustomName"
+      payload: '{"value": "ev_charger"}'
+
+## Why the Loop is Now Broken
+#User sets 16A in HA
+#  → number.ev_charger_set_charge_current = 16
+#  → push fires → W/.../SetCurrent = 16   ← Victron stores 16 ✓
+#  → Victron echoes N/.../SetCurrent = 16
+#  → bidirectional deduplication: 16 == 16 → IGNORED ✓
+
+#User sets 10A in VRM
+#  → N/.../SetCurrent = 10
+#  → bidirectional: 10 != 16, mode=0 → applies 10A to HA
+#  → push fires → W/.../SetCurrent = 10   ← Victron stores 10 ✓
+#  → Victron echoes 10 → 10 == 10 → IGNORED ✓

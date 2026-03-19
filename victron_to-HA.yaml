@@ -1,0 +1,85 @@
+alias: Victron - Apply EV charger commands from Victron
+description: ""
+triggers:
+  - topic: venus-home/N/48e7da87b65f/evcharger/+/SetCurrent
+    id: set_current
+    trigger: mqtt
+  - topic: venus-home/N/48e7da87b65f/evcharger/+/StartStop
+    id: start_stop
+    trigger: mqtt
+conditions:
+  - condition: template
+    value_template: >
+      {{ trigger.topic.split('/')[4] ==
+         states('input_text.victron_instance_ev1') }}
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: set_current
+          # Gate 1: Not in Auto mode
+          - condition: template
+            value_template: >
+              {{ states('input_text.victron_ev_mode') | int(-1) != 1 }}
+          # Gate 2: Value differs from current HA value
+          - condition: template
+            value_template: >
+              {{ (trigger.payload_json.value | int) !=
+                 (states('number.ev_charger_set_charge_current') | int) }}
+        sequence:
+          - target:
+              entity_id: number.ev_charger_set_charge_current
+            data:
+              value: >
+                {{ [ [trigger.payload_json.value | int, 6] | max, 16 ] | min }}
+            action: number.set_value
+
+      - conditions:
+          - condition: trigger
+            id: start_stop
+          # Deduplication: only apply if value differs from current HA state.
+          # StartStop=1 means On, StartStop=0 means Off.
+          # Without this, every push → Victron echo → apply → push → loop.
+          - condition: template
+            value_template: >
+              {% set incoming = trigger.payload_json.value | int %}
+              {% set current  = 1 if is_state('select.ev_charger_charging', 'On') else 0 %}
+              {{ incoming != current }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.payload_json.value == 1 }}"
+                sequence:
+                  - target:
+                      entity_id: select.ev_charger_charging
+                    data:
+                      option: "On"
+                    action: select.select_option
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.payload_json.value == 0 }}"
+                sequence:
+                  - target:
+                      entity_id: select.ev_charger_charging
+                    data:
+                      option: "Off"
+                    action: select.select_option
+
+## Why the loop now breaks
+#```
+#User sets On in HA
+#  → push fires → W/.../StartStop = 1
+#  → Victron echoes N/.../StartStop = 1
+#  → bidirectional: incoming=1, current=On → 1 == 1 → IGNORED ✓
+
+#User sets Off in HA
+#  → push fires → W/.../StartStop = 0
+#  → Victron echoes N/.../StartStop = 0
+#  → bidirectional: incoming=0, current=Off → 0 == 0 → IGNORED ✓
+
+#Genuine VRM start command
+#  → N/.../StartStop = 1, current=Off → 1 != 0 → APPLIED ✓
+
+#Genuine VRM stop command
+#  → N/.../StartStop = 0, current=On → 0 != 1 → APPLIED ✓
